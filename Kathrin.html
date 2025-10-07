@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Coach Chat – Mehr Gelassenheit im Job</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #111827;
+      --text: #e5e7eb;
+      --text-dim: #94a3b8;
+      --border: #1f2937;
+      --accent-2: #38bdf8;
+      --danger: #ef4444;
+      --ok: #22c55e;
+    }
+    body {
+      margin: 0;
+      background: radial-gradient(1200px 800px at 20% -10%, #0b1220 0%, var(--bg) 45%),
+                  linear-gradient(160deg, #0b1220 0%, var(--bg) 50%);
+      color: var(--text);
+      font: 14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, "Helvetica Neue", Arial;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      min-height: 100vh;
+      gap: 12px;
+      padding: 16px;
+    }
+    h1 {
+      font-size: 18px;
+      font-weight: 600;
+      color: var(--accent-2);
+      text-align: center;
+      margin-top: 12px;
+    }
+    .chat {
+      display: flex;
+      flex-direction: column;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      width: 100%;
+      max-width: 640px;
+      height: 70vh;
+      overflow: hidden;
+    }
+    .messages {
+      flex: 1;
+      padding: 16px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .bubble {
+      max-width: min(76ch, 90%);
+      padding: 10px 12px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+    }
+    .user { align-self: flex-end; background: linear-gradient(180deg, #10243a, #0f2136); }
+    .ai { align-self: flex-start; background: #0b1324; }
+    .meta { font-size: 11px; color: var(--text-dim); margin-bottom: 4px; }
+    .composer {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 12px;
+      border-top: 1px solid var(--border);
+    }
+    .composer-row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+    }
+    input {
+      height: 42px;
+      border-radius: 10px;
+      background: #0b1324;
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 0 12px;
+      outline: none;
+    }
+    button {
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      height: 42px;
+      font-weight: 600;
+      transition: filter 0.15s ease;
+    }
+    .primary {
+      background: linear-gradient(180deg, #1e90ff, #0ea5e9);
+      color: #001220;
+    }
+    .danger {
+      background: linear-gradient(180deg, #ef4444, #dc2626);
+      color: #fff;
+    }
+    button:hover { filter: brightness(1.1); }
+    .status { font-size: 12px; color: var(--text-dim); text-align: center; margin-top: 4px; }
+    .msg { font-size: 12px; margin-top: 4px; text-align: center; }
+    .error { color: var(--danger); }
+    .success { color: var(--ok); }
+  </style>
+</head>
+<body>
+  <h1>Mehr Gelassenheit im Job. Tag 1 von 30</h1>
+
+  <section class="chat" aria-live="polite">
+    <div id="messages" class="messages" role="log" aria-label="Chat history"></div>
+
+    <div class="composer">
+      <div class="composer-row">
+        <input id="chatInput" type="text" placeholder="Hier Ihre Nachricht verfassen (Enter zum Senden)" />
+        <button id="sendBtn" class="primary">Senden</button>
+      </div>
+      <button id="newChatBtn" class="danger" title="Clear chat and set context">Neuer Chat</button>
+      <span id="status" class="status"></span>
+      <div id="msg" class="msg"></div>
+    </div>
+  </section>
+
+  <script>
+    (function () {
+      const COACH_URL = "https://staging.n8n.constancy.biz/webhook/Coach";
+      const KONTEXT_URL = "https://staging.n8n.constancy.biz/webhook/Kontext";
+
+      const hardcoded = {
+        Ziel: "Mehr Gelassenheit im Job",
+        Ziel_id: "4",
+        Timeline: "Tag 1 von 30",
+        Kontext: "",
+        Erkenntnisse: ""
+      };
+
+      const $messages = document.getElementById('messages');
+      const $chatInput = document.getElementById('chatInput');
+      const $sendBtn = document.getElementById('sendBtn');
+      const $newChatBtn = document.getElementById('newChatBtn');
+      const $status = document.getElementById('status');
+      const $msg = document.getElementById('msg');
+
+      let history = [];
+      let busy = false;
+      let lastZielIdSentToCoach = hardcoded.Ziel_id;
+
+      function setBusy(isBusy, label) {
+        busy = isBusy;
+        $sendBtn.disabled = isBusy;
+        $newChatBtn.disabled = isBusy;
+        $status.textContent = label || (isBusy ? 'Working…' : '');
+      }
+
+      function showMessage(text, type = 'error') {
+        $msg.className = 'msg ' + (type === 'error' ? 'error' : 'success');
+        $msg.textContent = text;
+        if (text) setTimeout(() => { $msg.textContent = ''; }, 4000);
+      }
+
+      function render() {
+        $messages.innerHTML = '';
+        for (const m of history) {
+          const wrap = document.createElement('div');
+          wrap.className = `bubble ${m.role === 'user' ? 'user' : 'ai'}`;
+          const meta = document.createElement('div');
+          meta.className = 'meta';
+          meta.textContent = `${m.role === 'user' ? 'You' : 'Coach'} • ${new Date(m.ts).toLocaleTimeString()}`;
+          const body = document.createElement('div');
+          body.textContent = m.content;
+          wrap.appendChild(meta);
+          wrap.appendChild(body);
+          $messages.appendChild(wrap);
+        }
+        $messages.scrollTop = $messages.scrollHeight;
+      }
+
+      function append(role, content) {
+        history.push({ role, content, ts: Date.now() });
+        render();
+      }
+
+      async function sendToCoach(userText) {
+        const payload = { User_Input: userText, ...hardcoded };
+        setBusy(true, 'Coach denkt nach...');
+        try {
+          const res = await fetch(COACH_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          if (!res.ok) throw new Error(`Coach request failed (${res.status})`);
+          const data = await res.json();
+          const output = data.output || JSON.stringify(data);
+          append('ai', output);
+          showMessage('Coach hat geantwortet', 'success');
+        } catch (err) {
+          append('ai', '⚠️ Error: ' + err.message);
+          showMessage(err.message || 'Request failed');
+        } finally {
+          setBusy(false);
+        }
+      }
+
+      async function sendKontext() {
+        const ctxPayload = { Ziel_id: String(lastZielIdSentToCoach) };
+        setBusy(true, '');
+        try {
+          const res = await fetch(KONTEXT_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(ctxPayload)
+          });
+          if (!res.ok) throw new Error(`Kontext request failed (${res.status})`);
+          showMessage('', 'success');
+        } catch (err) {
+          showMessage(err.message || 'Deleting Chat failed');
+        } finally {
+          setBusy(false);
+        }
+      }
+
+      $sendBtn.addEventListener('click', async () => {
+        if (busy) return;
+        const text = $chatInput.value.trim();
+        if (!text) return;
+        append('user', text);
+        $chatInput.value = '';
+        await sendToCoach(text);
+      });
+
+      $chatInput.addEventListener('keydown', async (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          $sendBtn.click();
+        }
+      });
+
+      $newChatBtn.addEventListener('click', async () => {
+        if (busy) return;
+        history = [];
+        render();
+        showMessage('', 'success');
+        await sendKontext();
+      });
+
+      render();
+    })();
+  </script>
+</body>
+</html>
